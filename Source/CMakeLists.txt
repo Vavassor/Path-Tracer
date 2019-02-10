@@ -1,24 +1,24 @@
 cmake_minimum_required(VERSION 3.0)
-project(ThreadTest VERSION 1.0.0)
+project(PathTracer VERSION 1.0.0)
 
-add_executable(ThreadTest "")
+add_executable(PathTracer "")
 
 set_target_properties(
-    ThreadTest
+    PathTracer
     PROPERTIES
     C_STANDARD 99
     C_STANDARD_REQUIRED ON
 )
 
 target_link_libraries(
-    ThreadTest
+    PathTracer
     PRIVATE
     $<$<PLATFORM_ID:Linux>:pthread>
     $<$<C_COMPILER_ID:GNU>:m>
 )
 
 target_sources(
-    ThreadTest
+    PathTracer
     PRIVATE
     bmp.c
     filesystem.c

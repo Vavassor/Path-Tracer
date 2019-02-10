@@ -51,8 +51,8 @@ typedef struct Camera
 
 typedef struct Material
 {
-    Float3 emissive_colour;
-    Float3 reflective_colour;
+    Float3 emittance;
+    Float3 reflectance;
     float glossiness;
 } Material;
 
@@ -226,89 +226,89 @@ Float3 get_random_direction(RandomGenerator* generator)
     return float3_normalise(result);
 }
 
-Float3 cast_ray(Ray ray, World* world, RandomGenerator* generator)
+Float3 trace_path(Ray ray, World* world, RandomGenerator* generator, int depth)
 {
-    Float3 result = float3_zero;
-    Float3 attenuation = float3_one;
+    const int max_depth = 4;
 
-    for(int ray_count = 0;
-            ray_count < 4;
-            ray_count += 1)
+    if(depth >= max_depth)
     {
-        const float min_hit_distance = 0.0001f;
-        float hit_distance = FLT_MAX;
-        int hit_material_index = 0;
-        Float3 hit_normal = float3_unit_z;
+        Material material = world->materials[0];
+        return material.emittance;
+    }
 
-        for(int plane_index = 0;
-                plane_index < world->planes_count;
-                plane_index += 1)
+    const float min_hit_distance = 0.0001f;
+    float hit_distance = FLT_MAX;
+    int hit_material_index = 0;
+    Float3 hit_normal = float3_unit_z;
+
+    for(int plane_index = 0;
+            plane_index < world->planes_count;
+            plane_index += 1)
+    {
+        Plane plane = world->planes[plane_index];
+
+        MaybeFloat intersection = intersect_ray_plane(ray, plane);
+
+        if(intersection.valid)
         {
-            Plane plane = world->planes[plane_index];
+            float distance = intersection.value;
 
-            MaybeFloat intersection = intersect_ray_plane(ray, plane);
-
-            if(intersection.valid)
+            if(distance > min_hit_distance && distance < hit_distance)
             {
-                float distance = intersection.value;
-
-                if(distance > min_hit_distance && distance < hit_distance)
-                {
-                    hit_material_index = plane.material_index;
-                    hit_distance = distance;
-                    hit_normal = plane.normal;
-                }
+                hit_material_index = plane.material_index;
+                hit_distance = distance;
+                hit_normal = plane.normal;
             }
-        }
-
-        for(int sphere_index = 0;
-                sphere_index < world->spheres_count;
-                sphere_index += 1)
-        {
-            Sphere sphere = world->spheres[sphere_index];
-
-            MaybeFloat intersection = intersect_ray_sphere(ray, sphere);
-
-            if(intersection.valid)
-            {
-                float distance = intersection.value;
-
-                if(distance > min_hit_distance && distance < hit_distance)
-                {
-                    hit_material_index = sphere.material_index;
-                    hit_distance = distance;
-
-                    Float3 hit_point = float3_add(float3_multiply(hit_distance, ray.direction), ray.origin);
-                    hit_normal = float3_normalise(float3_subtract(hit_point, sphere.center));
-                }
-            }
-        }
-
-        if(hit_material_index)
-        {
-            Material material = world->materials[hit_material_index];
-
-            result = float3_add(result, float3_pointwise_multiply(attenuation, material.emissive_colour));
-            attenuation = float3_pointwise_multiply(attenuation, material.reflective_colour);
-
-            Float3 pure_bounce = float3_normalise(float3_reflect(ray.direction, hit_normal));
-            Float3 random_direction = get_random_direction(generator);
-            Float3 scatter_bounce = float3_normalise(float3_add(hit_normal, random_direction));
-
-            ray.origin = float3_add(float3_multiply(hit_distance, ray.direction), ray.origin);
-            ray.direction = float3_normalise(float3_lerp(scatter_bounce, pure_bounce, material.glossiness));
-        }
-        else
-        {
-            Material material = world->materials[hit_material_index];
-
-            result = float3_add(result, float3_pointwise_multiply(attenuation, material.emissive_colour));
-
-            break;
         }
     }
 
-    return result;
+    for(int sphere_index = 0;
+            sphere_index < world->spheres_count;
+            sphere_index += 1)
+    {
+        Sphere sphere = world->spheres[sphere_index];
+
+        MaybeFloat intersection = intersect_ray_sphere(ray, sphere);
+
+        if(intersection.valid)
+        {
+            float distance = intersection.value;
+
+            if(distance > min_hit_distance && distance < hit_distance)
+            {
+                hit_material_index = sphere.material_index;
+                hit_distance = distance;
+
+                Float3 hit_point = float3_add(float3_multiply(hit_distance, ray.direction), ray.origin);
+                hit_normal = float3_normalise(float3_subtract(hit_point, sphere.center));
+            }
+        }
+    }
+
+    if(!hit_material_index)
+    {
+        Material material = world->materials[hit_material_index];
+        return material.emittance;
+    }
+
+    Material material = world->materials[hit_material_index];
+
+    Float3 pure_bounce = float3_normalise(float3_reflect(ray.direction, hit_normal));
+    Float3 random_direction = get_random_direction(generator);
+    Float3 scatter_bounce = float3_normalise(float3_add(hit_normal, random_direction));
+
+    ray.origin = float3_add(float3_multiply(hit_distance, ray.direction), ray.origin);
+    ray.direction = float3_normalise(float3_lerp(scatter_bounce, pure_bounce, material.glossiness));
+
+    const float p = 1.0f / (2.0f * M_PI);
+    float cos_theta = float3_dot(ray.direction, hit_normal);
+    Float3 brdf = float3_divide(material.reflectance, M_PI);
+
+    Float3 incoming = trace_path(ray, world, generator, depth + 1);
+
+    Float3 reflecting = float3_multiply(cos_theta / p, float3_pointwise_multiply(brdf, incoming));
+
+    return float3_add(reflecting, material.emittance);
 }
 
 void render_tile(void* parameter)
@@ -369,7 +369,7 @@ void render_tile(void* parameter)
                 ray.origin = camera->position;
                 ray.direction = float3_normalise(float3_subtract(ray_point, ray.origin));
 
-                Float3 sample = cast_ray(ray, tile->world, &generator);
+                Float3 sample = trace_path(ray, tile->world, &generator, 0);
                 colour = float3_add(colour, float3_multiply(contribution, sample));
             }
 
@@ -404,22 +404,22 @@ int main(int argc, const char** argv)
 
         Material background =
         {
-            .emissive_colour = {0.3f, 0.4f, 0.5f},
+            .emittance = {0.3f, 0.4f, 0.5f},
         };
 
         Material red =
         {
-            .reflective_colour = {0.5f, 0.5f, 0.5f},
+            .reflectance = {0.5f, 0.5f, 0.5f},
         };
 
         Material cyan =
         {
-            .reflective_colour = {0.7f, 0.5f, 0.3f},
+            .reflectance = {0.7f, 0.5f, 0.3f},
         };
 
         Material boyfriend_material =
         {
-            .reflective_colour = {0.7f, 0.5f, 0.3f},
+            .reflectance = {0.7f, 0.5f, 0.3f},
             .glossiness = 0.7f,
         };
 
