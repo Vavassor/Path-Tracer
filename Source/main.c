@@ -5,6 +5,7 @@
 #include "vector_math.h"
 
 #include <float.h>
+#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -399,7 +400,7 @@ int main(int argc, const char** argv)
         {
             .position = {0.0f, -5.0f, 1.0f},
             .target = float3_zero,
-            .field_of_view = M_PI_4,
+            .field_of_view = (float) M_PI_4,
         };
 
         Material background =

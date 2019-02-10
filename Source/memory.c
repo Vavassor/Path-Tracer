@@ -31,7 +31,7 @@ void copy_memory(void* to, const void* from, uint64_t bytes)
 
 void deallocate(Allocator* allocator, void* memory, uint64_t bytes)
 {
-    return free(memory);
+    free(memory);
 }
 
 void zero_memory(void* memory, uint64_t bytes)

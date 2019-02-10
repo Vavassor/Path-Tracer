@@ -10,6 +10,12 @@ set_target_properties(
     C_STANDARD_REQUIRED ON
 )
 
+target_compile_options(
+	ThreadTest
+	PRIVATE
+	$<$<C_COMPILER_ID:MSVC>:-D_CRT_SECURE_NO_WARNINGS>
+)
+
 target_link_libraries(
     PathTracer
     PRIVATE
@@ -28,5 +34,7 @@ target_sources(
     thread_pool.c
     vector_math.c
     $<$<PLATFORM_ID:Linux>:thread_pool_posix.c>
+	$<$<PLATFORM_ID:Windows>:thread_pool_windows.c>
     $<$<C_COMPILER_ID:GNU>:atomic_gcc.c>
+	$<$<C_COMPILER_ID:MSVC>:atomic_msvc.c>
 )

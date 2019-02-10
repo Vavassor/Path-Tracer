@@ -1,15 +1,9 @@
-#include "thread_pool.h"
-
-#include "atomic.h"
 #include "thread_pool_internal.h"
+
+#include "assert.h"
 
 #include <pthread.h>
 #include <unistd.h>
-
-#include <assert.h>
-
-#define ASSERT(expression) \
-    assert(expression)
 
 
 struct Condition
