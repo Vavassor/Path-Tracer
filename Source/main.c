@@ -57,6 +57,18 @@ typedef struct Material
     float glossiness;
 } Material;
 
+typedef struct Triangle
+{
+    Float3 vertices[3];
+} Triangle;
+
+typedef struct Mesh
+{
+    Triangle triangles[16];
+    int triangles_count;
+    uint32_t material_index;
+} Mesh;
+
 typedef struct Plane
 {
     Float3 normal;
@@ -80,9 +92,11 @@ typedef struct Sphere
 typedef struct World
 {
     Material materials[4];
+    Mesh meshes[4];
     Plane planes[4];
     Sphere spheres[4];
     int materials_count;
+    int meshes_count;
     int planes_count;
     int spheres_count;
 } World;
@@ -147,6 +161,15 @@ static Float3 linear_to_srgb(Float3 colour)
     result.x = linear_to_srgb_component(colour.x);
     result.y = linear_to_srgb_component(colour.y);
     result.z = linear_to_srgb_component(colour.z);
+    return result;
+}
+
+static Float3 float3_clamp_unorm(Float3 v)
+{
+    Float3 result;
+    result.x = fmaxf(fminf(v.x, 1.0f), 0.0f);
+    result.y = fmaxf(fminf(v.y, 1.0f), 0.0f);
+    result.z = fmaxf(fminf(v.z, 1.0f), 0.0f);
     return result;
 }
 
@@ -217,6 +240,47 @@ MaybeFloat intersect_ray_sphere(Ray ray, Sphere sphere)
     return result;
 }
 
+MaybeFloat intersect_ray_triangle(Ray ray, Triangle triangle)
+{
+    MaybeFloat result;
+    result.valid = false;
+
+    Float3 edges[2];
+    edges[0] = float3_subtract(triangle.vertices[1], triangle.vertices[0]);
+    edges[1] = float3_subtract(triangle.vertices[2], triangle.vertices[0]);
+
+    Float3 p = float3_cross(ray.direction, edges[1]);
+    float determinant = float3_dot(edges[0], p);
+
+    if(fabsf(determinant) < 1e-6f)
+    {
+        return result;
+    }
+
+    float inv_det = 1.0f / determinant;
+
+    Float3 s = float3_subtract(ray.origin, triangle.vertices[0]);
+    float u = inv_det * float3_dot(s, p);
+    if(u < 0.0f || u > 1.0f)
+    {
+        return result;
+    }
+
+    Float3 q = float3_cross(s, edges[0]);
+    float v = inv_det * float3_dot(ray.direction, q);
+    if(v < 0.0f || u + v > 1.0f)
+    {
+        return result;
+    }
+
+    float t = inv_det * float3_dot(edges[1], q);
+
+    result.valid = true;
+    result.value = t;
+
+    return result;
+}
+
 Float3 get_random_direction(RandomGenerator* generator)
 {
     Float3 result;
@@ -241,6 +305,40 @@ Float3 trace_path(Ray ray, World* world, RandomGenerator* generator, int depth)
     float hit_distance = FLT_MAX;
     int hit_material_index = 0;
     Float3 hit_normal = float3_unit_z;
+
+    for(int mesh_index = 0;
+            mesh_index < world->meshes_count;
+            mesh_index += 1)
+    {
+        Mesh mesh = world->meshes[mesh_index];
+
+        for(int triangle_index = 0;
+                triangle_index < mesh.triangles_count;
+                triangle_index += 1)
+        {
+            Triangle triangle = mesh.triangles[triangle_index];
+
+            Float3 triangle_normal = float3_normalise(float3_cross(float3_subtract(triangle.vertices[1], triangle.vertices[0]), float3_subtract(triangle.vertices[2], triangle.vertices[0])));
+            if(float3_dot(float3_subtract(ray.origin, triangle.vertices[0]), triangle_normal) < 0.0f)
+            {
+                triangle_normal = float3_negate(triangle_normal);
+            }
+
+            MaybeFloat intersection = intersect_ray_triangle(ray, triangle);
+
+            if(intersection.valid)
+            {
+                float distance = intersection.value;
+
+                if(distance > min_hit_distance && distance < hit_distance)
+                {
+                    hit_material_index = mesh.material_index;
+                    hit_distance = distance;
+                    hit_normal = triangle_normal;
+                }
+            }
+        }
+    }
 
     for(int plane_index = 0;
             plane_index < world->planes_count;
@@ -307,9 +405,9 @@ Float3 trace_path(Ray ray, World* world, RandomGenerator* generator, int depth)
 
     Float3 incoming = trace_path(ray, world, generator, depth + 1);
 
-    Float3 reflecting = float3_multiply(cos_theta / p, float3_pointwise_multiply(brdf, incoming));
+    Float3 radiance = float3_multiply(cos_theta / p, float3_pointwise_multiply(brdf, incoming));
 
-    return float3_add(reflecting, material.emittance);
+    return float3_add(radiance, material.emittance);
 }
 
 void render_tile(void* parameter)
@@ -374,6 +472,7 @@ void render_tile(void* parameter)
                 colour = float3_add(colour, float3_multiply(contribution, sample));
             }
 
+            colour = float3_clamp_unorm(colour);
             Float3 srgb_colour = linear_to_srgb(colour);
             uint32_t pixel_value = rgb_to_uint32(srgb_colour);
 
@@ -459,12 +558,23 @@ int main(int argc, const char** argv)
             .material_index = 3,
         };
 
+        Mesh triang =
+        {
+            .triangles[0].vertices[0] = {-0.5f, -3.0f, 0.0f},
+            .triangles[0].vertices[2] = {1.0f, -2.0f, 0.0f},
+            .triangles[0].vertices[1] = {-0.5f, -3.0f, 1.0f},
+            .triangles_count = 1,
+            .material_index = 3,
+        };
+
         World world = {0};
         world.materials_count = 3;
         world.materials[0] = background;
         world.materials[1] = red;
         world.materials[2] = cyan;
         world.materials[3] = boyfriend_material;
+        world.meshes_count = 1;
+        world.meshes[0] = triang;
         world.planes_count = 1;
         world.planes[0] = plane;
         world.spheres_count = 4;

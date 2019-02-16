@@ -11,7 +11,7 @@ set_target_properties(
 )
 
 target_compile_options(
-	ThreadTest
+	PathTracer
 	PRIVATE
 	$<$<C_COMPILER_ID:MSVC>:-D_CRT_SECURE_NO_WARNINGS>
 )
